@@ -7,7 +7,7 @@ library(brms) #for Bayesian (multilevel) generalised linear modelling
 library(modelr) #for data manipulation
 library(tidybayes) #for analysis of posterior draws of a Bayesian model
 library(ggplot2)
-library(rstan)
+# library(rstan)
 library(tidyr)
 
 od_data = read.csv(file = "~/data/shrew_learning/OD_Task.csv",
