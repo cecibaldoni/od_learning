@@ -10,7 +10,7 @@ library(ggplot2)
 # library(rstan)
 library(tidyr)
 
-od_data = read.csv(file = "~/data/shrew_learning/OD_Task.csv",
+od_data = read.csv(file = "~/data/od_learning/OD_Task.csv",
                    header = TRUE, sep = ",", dec = ".", na.strings = "NA")
 #od_data = read.csv(file = "OD_Task.csv",
 #                   header = TRUE, sep = ",", dec = ".", na.strings = "NA")
@@ -21,8 +21,8 @@ od_data$test_ID <- factor(od_data$test_ID, ordered = TRUE)
 od_data$ID <- as.factor(od_data$ID)
 
 
-# subset <- od_data %>%
-#   select(ID, season, seasonF, test_ID, success)
+subset <- od_data %>%
+  select(ID, season, seasonF, test_ID, success)
 # str(subset)
 
 ###############
@@ -50,27 +50,30 @@ prior1 <- c(prior(normal(-1, 1), class = Intercept),
 #reflecting our belief that there is some variation in success rates among individuals that is not explained by the "season" variable.
 
 ## get posterior predictions
-Bayes_Model_Binary <- brm(formula = success ~ seasonF + (1|ID), 
+Bayes_Model_Binary1 <- brm(formula = success ~ seasonF + (1|ID), 
                           data = subset, family = bernoulli(link="logit"), 
                           warmup = 500, iter = 20000, chains = 4, thin = 10, 
                           cores = 4, #backend = "cmdstanr", 
                           prior = prior1)
 
-prior_summary(Bayes_Model_Binary)
-plot(Bayes_Model_Binary)
-mcmc_plot(Bayes_Model_Binary,
+prior_summary(Bayes_Model_Binary1)
+plot(Bayes_Model_Binary1)
+mcmc_plot(Bayes_Model_Binary1,
           type = "trace")
-mcmc_plot(Bayes_Model_Binary, type = "hist") #show histograms of the posterior distributions
-mcmc_plot(Bayes_Model_Binary) #plot posterior intervals
-mcmc_plot(Bayes_Model_Binary,
+mcmc_plot(Bayes_Model_Binary1, type = "hist") #show histograms of the posterior distributions
+mcmc_plot(Bayes_Model_Binary1) #plot posterior intervals
+mcmc_plot(Bayes_Model_Binary1,
           type = "acf_bar")
 
-summary(Bayes_Model_Binary)
+summary(Bayes_Model_Binary1)
 #it cannot estimate the variance from ID, probably there's no effect of ID on predicting success rate
-mcmc_plot(Bayes_Model_Binary,
+mcmc_plot(Bayes_Model_Binary1,
           type = "areas",
           prob = 0.95)
 #No significative effect
+
+get_variables(Bayes_Model_Binary1)
+
 
 #######################
 ###new changes, 4/11###
@@ -144,8 +147,9 @@ Bayes_Model_Binary <- brm(formula = success ~ seasonF*test_ID + (1+test_ID|ID),
                               warmup = 500, iter = 2000, chains = 4, #thin = 10, 
                               cores = 4, 
                               prior = bm_prior_new)
-Bayes_Model_Binary
+summary(Bayes_Model_Binary)
 #less complex, but still summer is supported.
+
 
 #make plot with average trend and each shrew trend per season
 library(here)
@@ -170,13 +174,70 @@ theme_set(theme_tidybayes() + panel_border())
 #se the get_variables() function to get a list of raw model variable names 
 #so that we know what variables we can extract from the model
 get_variables(Bayes_Model_Binary_new)
-
+get_variables(Bayes_Model_Binary)
 #https://cran.r-project.org/web/packages/tidybayes/vignettes/tidy-brms.html
 #https://github.com/mvuorre/brmstools
 
+#with this specification (r_condition[condition,term]) spread_draws() splits the variable indices by commas and spaces (you can split by other characters by changing the sep argument). 
+#It lets you assign columns to the resulting indices in order. So r_ID[whatever,Intercept] has indices ID and intercept, and spread_draws() lets us extract these indices as columns in the resulting tidy data frame of draws from r_condition
 Bayes_Model_Binary_new %>% 
   spread_draws(r_ID[20210802-1,Intercept]) %>% 
   head(10)
+#In this particular model, there is only one term (Intercept), 
+#thus we could omit that index altogether to just get each condition and the value of r_condition for that condition
+Bayes_Model_Binary_new %>% 
+  spread_draws(r_ID[20210802-1,]) %>% 
+  head(10)
+
+Bayes_Model_Binary_new %>%
+  spread_draws(b_Intercept) %>%
+  median_qi()
+
+
+Bayes_Model_Binary_new %>%
+  spread_draws(b_Intercept, r_ID[ID,], ) %>%
+  median_qi(condition_mean = b_Intercept + r_ID, .width = c(.95, .66)) %>%
+  ggplot(aes(y = ID, x = ID_mean, xmin = .lower, xmax = .upper)) +
+  geom_pointinterval() 
+#If you would rather have a long-format list of intervals, use gather_draws() instead:
+Bayes_Model_Binary_new %>%
+  gather_draws(b_Intercept) %>%
+  median_qi()
+
+Bayes_Model_Binary_new %>%
+  spread_draws(r_ID[ID,]) %>%
+  median_qi()
+
+Bayes_Model_Binary_new %>%
+  spread_draws(b_Intercept, r_ID[ID,]) %>%
+  summarise_draws()
+#Within each draw, b_Intercept is repeated as necessary to correspond to every index of r_condition. 
+#Thus, the mutate function from dplyr can be used to find their sum, condition_mean (which is the mean for each condition)
+#we can simplify by moving the calculation of condition_mean from mutate into median_qi()
+#median_qi() and its sister functions can produce an arbitrary number of probability intervals by setting the .width = argument
+Bayes_Model_Binary_new %>%
+  spread_draws(b_Intercept, r_ID[ID,]) %>%
+  median_qi(condition_mean = b_Intercept + r_ID, .width = c(.95, .8, .5))
+#The results are in a tidy format: one row per group and uncertainty interval width (.width). This facilitates plotting
+
+Bayes_Model_Binary_new %>%
+  spread_draws(b_Intercept, r_ID[ID,]) %>%
+  median_qi(condition_mean = b_Intercept + r_ID, .width = c(.95, .66)) %>%
+  ggplot(aes(y = ID, x = condition_mean, xmin = .lower, xmax = .upper)) +
+  geom_pointinterval() 
+
+Bayes_Model_Binary1 %>%
+  spread_draws(b_Intercept, r_ID[ID,]) %>%
+  median_qi(condition_mean = b_Intercept + r_ID, .width = c(.95, .66)) %>%
+  ggplot(aes(y = ID, x = condition_mean, xmin = .lower, xmax = .upper)) +
+  stat_eye() +
+  geom_vline(xintercept = c(-.5, -.1), linetype = "dashed") +
+  scale_fill_manual(values = c("gray80", "skyblue"))
+  #instead of stat_halfeye() I can try
+  #geom_pointinterval() 
+
+
+
 
 spaghetti_plot <- plot(
   conditional_effects(
@@ -188,8 +249,6 @@ spaghetti_plot <- plot(
   theme = theme_bw()
 )
 
-data(sleepstudy, package = "lme4")
-lme4::sleepstudy
 #sample for sleepstudy is 18 subjects, 10 trial per subject (fully balanced)
 
 #WTF. Before it worked and now it doesn't?
@@ -309,7 +368,7 @@ subset1 <- od_data %>%
             total = n())
 subset1
 
-Bayes_Model_Prop <- brm(success | trials(250) ~ season,
+Bayes_Model_Prop <- brm(success | trials(250) ~ season + test_ID,
                         data = subset,
                         family = binomial(link = "logit"),
                         warmup = 500,
@@ -324,6 +383,38 @@ mcmc_plot(Bayes_Model_Prop,
           type = "acf_bar")
 summary(Bayes_Model_Prop)
 fixef(Bayes_Model_Prop)
+model_easy <- brm(success ~ season + test_ID,
+                        data = subset,
+                        family = binomial(link = "logit"),
+                        warmup = 500,
+                        iter = 2000,
+                        chains = 4,
+                        #thin = 10,
+                        cores = 4)
+summary(model_easy)
+get_variables(model_easy)
+subset %>% 
+  data_grid(test_ID) %>% 
+  add_epred_draws(model_easy, dpar = TRUE, category = "season") %>% 
+  ggplot(aes(x = test_ID, y = .epred, color = season)) +
+  stat_pointinterval(position = position_dodge(width = .4)) +
+  scale_size_continuous(guide = "none") +
+  scale_color_manual(values = brewer.pal(6, "Blues")[-c(1,2)])
+
+subset %>% 
+  add_epred_draws(model_easy, category = season) %>% 
+  ggplot(aes(x = test_ID, y = .epred, color = season)) +
+  stat_pointinterval(position = position_dodge(width = .4)) +
+  scale_size_continuous(guide = "none")
+
+
+subset %>% 
+  select(test_ID) %>% 
+  add_predicted_draws(model_easy, seed = 1234) %>% 
+  ggplot(aes(x = test_ID, y = success)) +
+  geom_count(color = "gray75") +
+  geom_point(aes(fill = season), data = subset, shape = 21, size = 2) +
+  scale_fill_brewer(palette = "Dark2")
 
 
 #are there any other parameters that can explain the data?
